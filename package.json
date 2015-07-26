@@ -1,0 +1,15 @@
+{
+  "name": "flapmmo",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "socket.io": "^1.3.6"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "hannyajin <talmo.christian@gmail.com> (http://jin.fi/)",
+  "license": "ISC"
+}
