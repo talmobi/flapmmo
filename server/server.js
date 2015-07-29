@@ -5,22 +5,40 @@ var io = require('socket.io')(port);
 // list of all sockets
 var sockets = [];
 
+function HighScore (data) {
+  this.name = data.name || 'Anonymous';
+  this.data = {
+    startPosition: {
+      x: data.startPosition.x,
+      y: data.startPosition.y
+    },
+    events: data.events
+  };
+};
+function handlePuppet (data) {
+};
+var highScores = [];
+
 // create pipes
 var height = 256;
 var landHeight = 56;
 var pipes = [];
 var pipeInterval = 100;
+var startGap = 35;
 var gap = 30;
-var offX = 100;
-for (var i = 0; i < 30; i++) {
-  var d = (height - landHeight) * 0.4;
-  var h = (Math.random() * d + 60) | 0;
+var offX = 200;
+for (var i = 0; i < 35; i++) {
+  var d = (height - landHeight) * 0.1;
+  var h = (Math.random() * d * 4 + 60) | 0;
 
   var pipe = {
     x:  i * pipeInterval + offX,
     h: h,
     gap: gap,
   }
+
+  var newGap = (startGap - (i / 2)) | 0;
+  gap = Math.max(20, newGap);
 
   pipes.push( pipe );
 }
@@ -47,8 +65,19 @@ io.on('connection', function (socket) {
   // receive a puppet from a user
   socket.on('PUPPET', function (data) {
     log('puppet', "Got a puppet! length: " + data.events.length);
-    // broadcast the puppet to all other connected clients
-    io.emit('PUPPET', data);
+    // broadcast the puppet to all connected clients, including yourself (for debugging)
+
+    var d = {
+      startPosition: {
+        x: data.startPosition.x,
+        y: data.startPosition.y
+      },
+      events: data.events
+    };
+
+    io.emit('PUPPET', d);
+
+    /*socket.emit('PUPPET', data); - this line doesn't send it to yourself*/
   });
 
 
