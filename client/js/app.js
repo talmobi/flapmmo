@@ -6,8 +6,13 @@
   stats.domElement.style.position = 'absolute';
   stats.domElement.style.left = '0px';
   stats.domElement.style.top = '0px';
+  window.statsDomElement = stats.domElement;
+  if (window.location.hostname === 'localhost') {
+    stats.domElement.style.display = 'block';
+  } else {
+    stats.domElement.style.display = 'none';
+  }
   document.body.appendChild( stats.domElement );
-
 
   var height = 256;
   var width = (height * 16 / 9) | 0;
@@ -22,10 +27,12 @@
       },
       scoreDiv: document.createElement('div')
     },
-    bestScore: window.localStorage.getItem("flapmmo_high_score")
+    bestScore: window.localStorage.getItem("flapmmo_high_score"),
+    bestRun: window.localStorage.getItem("flapmmo_high_score_run"),
   };
 
-var renderer = new PIXI.autoDetectRenderer(width, height);
+var renderer = new PIXI.autoDetectRenderer(width, height, { resolution: 1 });
+//var renderer = new PIXI.WebGLRenderer(width, height, { resolution: 1 });
 
 var texFrames = {
   bg: { x: 0, y: 0, width: 144, height: 256 },
@@ -77,23 +84,49 @@ var player = null;
 
 var camera = {
   offset: { x: 120, y: 0 },
-  position: { x: 0, y: 0 }
+  position: { x: 0, y: 0 },
+  e: null
 };
 window.camera = camera;
 
 // mouse events
 document.body.addEventListener('mousedown', function (e) {
-  console.log("MOUSE CLICKED!");
+  //console.log("MOUSE DOWN CLICKED!");
 
-  // make player character jump on mouse click
-  if (player) {
-    player.handleClick();
+  if (e.button === 2) { // right mouse button
+    camera.e = e;
+  } else {
+    camera.e = null;
+    // make player character jump on mouse click
+    if (player) {
+      player.handleClick(e);
+      if (player.initialized) {
+        camera.offset.x = 120;
+      }
+    }
   }
-
-  return e.preventDefault();
+  e.preventDefault();
 });
+document.body.addEventListener('mousemove', function (e) {
+  if (e.button === 2) { // right mouse button
+    camera.e = e;
+  }
+});
+document.body.addEventListener('mouseup', function (e) {
+  //console.log("MOUSE UP CLICKED!");
+
+  if (e.button === 2) { // right mouse button
+    camera.e = null;
+  } else {
+  }
+  e.preventDefault();
+});
+window.oncontextmenu = function (e) {
+  return false;
+};
 
 var ui = null;
+var myId = -1;
 
 PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
   /* Socket Client
@@ -103,12 +136,13 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
   socket.on('HELLO', function (data) {
     console.log("Server says: " + data.message);
 
+    myId = data.id;
     pipes = data.pipes;
     stages.pipes.removeChildren();
     drawPipes( pipes );
 
     // send a hello back tot the server
-    socket.emit('HELLO', { message: "Hi server! Thanks for pipes!" });
+    socket.emit('HELLO', { id: myId, message: "Hi server! Thanks for pipes!" });
   });
 
   // receive a puppet from the server
@@ -116,9 +150,82 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
     // create a puppet based on the received events
     var puppet = new Puppet({
       x: data.startPosition.x,
-        y: data.startPosition.y
+      y: data.startPosition.y
     }, data.events );
+    puppet.id = data.id;
     puppets.push( puppet );
+  });
+
+  socket.on('LAST', function (data) {
+    console.log("Got LAST from Server!");
+
+    var ra = data.recentAttempts;
+    // play out last attempts with random delay
+    for (var i = 0; i < ra.length; i++) {
+      (function() {
+        var d = JSON.parse(JSON.stringify(ra[i]));
+        var delay = i * 1000;
+        setTimeout(function () {
+          var puppet = new Puppet({
+            x: d.startPosition.x,
+              y: d.startPosition.y
+          }, d.events );
+          puppet.id = d.id;
+          puppets.push( puppet );
+        }, delay);
+      })();
+    }
+  });
+
+  // receive status update from server
+  socket.on('STATUS', function (data) {
+    console.log("Got STATUS from Server!");
+
+    var highScores = data.highScores;
+
+    console.log("Highscores.length: " + highScores.length);
+
+    // create puppets of all the highscores
+    for (var i = 0; i < highScores.length; i++) {
+      var hs = highScores[i];
+      var data = hs.data;
+
+      /*
+      var puppet = new Puppet({
+        x: data.startPosition.x,
+        y: data.startPosition.y
+      }, data.events );
+      puppet.id = data.id;
+      puppets.push( puppet );
+      */
+
+      // update highscore view
+      var le = ui.highScoreListElements;
+      if (i < le.length) {
+        var domElement = le[i];
+        domElement.data = JSON.parse(JSON.stringify(data));
+        var score = data.events[data.events.length - 1].position.x;
+        domElement.innerHTML = (hs.name || 'Anon') + ' : ' + score;
+        console.log("topscores added");
+
+        domElement.addEventListener('click', function (e) {
+          console.log("List Element ON CLICK");
+
+          // spawn a puppet for that highscore
+          var data = JSON.parse(JSON.stringify(this.data));
+          console.log(data);
+          var puppet = new Puppet({
+            x: data.startPosition.x,
+            y: data.startPosition.y
+          }, data.events );
+          puppet.id = data.id;
+          puppets.push( puppet );
+
+          e.preventDefault();
+          return false;
+        });
+      }
+    }
   });
 
   var baseTex = assets.sheet.texture;
@@ -211,8 +318,10 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
     // create server wide top score modal
     var topScoresDiv = document.createElement('div');
     topScoresDiv.style['font-size'] = '24px';
+    topScoresDiv.style['z-index'] = '100';
     topScoresDiv.style.position = 'relative';
     var ul = document.createElement('ul');
+    var highScoreListElements = [];
     for (var i = 0; i < 6; i++) {
       var li = document.createElement('li');
       li.style['text-align'] = 'left';
@@ -221,6 +330,7 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
         li.style['border-bottom'] = '2px solid';
       li.innerHTML = "TOP SCORER " + i;
       ul.appendChild(li);
+      highScoreListElements.push(li);
     }
     topScoresDiv.appendChild(ul);
     topDiv.appendChild(topScoresDiv);
@@ -249,23 +359,30 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
         y: window.innerWidth / GLOBALS.height,
       };
 
+      scale.x /= 2;
+      // adjust font sizes
+      scoreDiv.style['font-size'] = '' + 30 * scale.x + 'px';
+      scoreDiv.style['font-size'] = '' + 30 * scale.x + 'px';
+      topScoresDiv.style['font-size'] = '' + 24 * scale.x + 'px';
+      gameStartDiv.style['font-size'] = '' + 30 * scale.x + 'px';
+
       // update relative positions
       topDiv.style.top = (bg.position.y - bg.height / 2) * scale.y;
-      topDiv.style.left = (bg.position.x - bg.width / 2) * scale.x;
+      topDiv.style.left = (bg.position.x - bg.width / 2) * scale.x * 2;
 
       var pp = sprGameStart.position;
       var ss = sprGameStart;
-      gameStartDiv.style.top = (pp.y - 20) * scale.y * bg.scale.x;
-      gameStartDiv.style.left = (pp.x - 120) * scale.x * bg.scale.y;
+      gameStartDiv.style.top = (pp.y - 20) * scale.y * bg.scale.x * 2;
+      gameStartDiv.style.left = (pp.x - 120) * scale.x * bg.scale.y * 2;
 
       scoreDiv.style.top = 28 * scale.y;
-      scoreDiv.style.left = 89 * scale.x;
+      scoreDiv.style.left = 89 * scale.x * 2;
 
       bestScoreDiv.style.top = (28 + 10) * scale.y;
-      bestScoreDiv.style.left = 89 * scale.x;
+      bestScoreDiv.style.left = 89 * scale.x * 2;
 
       topScoresDiv.style.top = 45 * scale.y;
-      topScoresDiv.style.left = 20 * scale.x;
+      topScoresDiv.style.left = 20 * scale.x * 2;
     };
     window.onresize();
 
@@ -304,6 +421,8 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
       setBestScore: function (score) {
         bestScoreDiv.innerHTML = score;
       },
+
+      highScoreListElements: highScoreListElements
     }
   })();
 
@@ -313,6 +432,7 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
   ui.setBestScore( window.localStorage.getItem("flapmmo_high_score") );
   //ui.hideGameOver();
   //ui.showGameStart();
+  ui.showGameStart();
 
   // create pipes
   /*
@@ -486,17 +606,6 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
       if (player && player.bird === this) {
         console.log("player bird has died");
 
-        // save best score locally
-        var best = window.localStorage.getItem("flapmmo_high_score");
-        if (this.score > best) {
-          GLOBALS.bestScore = this.score;
-          window.localStorage.setItem("flapmmo_high_score", this.score);
-          best = window.localStorage.getItem("flapmmo_high_score");
-          console.log("best score updated: " + best);
-          ui.setBestScore(best);
-        }
-
-
         var e = {
           type: "DEAD",
           position: {
@@ -505,6 +614,17 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
           }
         }
         player.events.push(e);
+
+        // save best score locally
+        var best = window.localStorage.getItem("flapmmo_high_score");
+        if (this.score > best) {
+          GLOBALS.bestScore = this.score;
+          window.localStorage.setItem("flapmmo_high_score", this.score);
+          window.localStorage.setItem("flapmmo_high_score_run", [].concat(player.events));
+          best = window.localStorage.getItem("flapmmo_high_score");
+          console.log("best score updated: " + best);
+          ui.setBestScore(best);
+        }
 
         /*
            var puppet = new Puppet({
@@ -519,9 +639,10 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
         // events to the server
         socket.emit('PUPPET', {
           events: player.events,
+          id: myId,
           startPosition: {
             x: this.startX,
-          y: this.startY
+            y: this.startY
           }
         });
         player.events = [];
@@ -572,6 +693,8 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
       var now = Date.now();
       if (now > this.bird.deadAt + 500) {
         this.bird.reset();
+        this.initialized = false;
+        ui.showGameStart();
       }
     }
 
@@ -579,7 +702,7 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
       return this.bird.state === this.bird.states.FLY;
     };
 
-    this.handleClick = function () {
+    this.handleClick = function (e) {
       if (!this.initialized) {
         this.initialized = true;
         ui.hideGameStart();
@@ -588,11 +711,14 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
       switch (this.bird.state) {
         case 'DEAD':
           // reset the game
-          this.reset();
-
-          if (this.bird.state === this.bird.states.FLY) {
-            // hide score screen
-            ui.hideGameOver();
+          // check to make sure we're not selecting from the
+          // highscore list
+          if (e.clientY < window.innerHeight / 2) {
+            this.reset();
+            if (this.bird.state === this.bird.states.FLY) {
+              // hide score screen
+              ui.hideGameOver();
+            }
           }
           break;
 
@@ -635,13 +761,8 @@ PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
         if (!this.dead) {
           console.log("Puppet died!");
           this.dead = true;
-          var self = this;
-          setTimeout(function () {
-            console.log("Puppet removed!");
-            var ind = puppets.indexOf( self );
-            puppets.splice( ind, 1 );
-            stages.birds.removeChild( self.bird.remove() );
-          }, 4000)
+          var ind = puppets.indexOf( this );
+          puppets.splice( ind, 1 );
         }
       }
 
@@ -659,6 +780,11 @@ function update() {
   for (var i = 0; i < birds.length; i++) {
     var bird = birds[i];
     bird.tick();
+  }
+
+
+  if (camera.e !== null && camera.e.button === 2) {
+    camera.offset.x += (-camera.e.clientX + window.innerWidth / 2) * 0.05;
   }
 
   if (player) {
