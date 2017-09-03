@@ -1,6 +1,23 @@
-var port = 4004;
-var io = require('socket.io')(port);
+var port = 16400;
 
+var path = require( 'path' )
+
+var express = require( 'express' )
+var app = express()
+var server = require( 'http' ).createServer( app )
+var io = require('socket.io')( server );
+
+var cors = require( 'cors' )
+
+// allow cors
+app.use( cors() )
+
+// server static frontend files
+app.use( express.static( path.join( __dirname, '../client' ) ) )
+
+server.listen( port, '127.0.0.1', function () {
+		console.log( 'server listening on *:' + server.address().port )
+})
 
 // list of all sockets
 var sockets = [];

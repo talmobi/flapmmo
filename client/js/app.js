@@ -131,7 +131,7 @@ var myId = -1;
 PIXI.loader.add('sheet', 'sheet.png').load(function (loader, assets) {
   /* Socket Client
    * */
-  var url = "http://localhost:4004";
+  var url = window.location.href; // "http://localhost:4004";
   var socket = io(url);
   socket.on('HELLO', function (data) {
     console.log("Server says: " + data.message);
